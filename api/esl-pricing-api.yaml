@@ -1,0 +1,276 @@
+openapi: "3.1.0"
+
+info:
+  title: ESL Pricing API
+  version: "0.1.0"
+  description: >
+    Contract between the ESL Pricing Service and the Raspberry Pi gateway.
+    The gateway polls this API for desired tag state and reports back confirmations.
+
+servers:
+  - url: /v1
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+
+  /catalog/variations:
+    get:
+      operationId: listVariations
+      summary: List all catalog variations for tag assignment
+      responses:
+        "200":
+          description: All known variations with parent item name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VariationList"
+
+  /tags:
+    get:
+      operationId: listTags
+      summary: List all tags with their desired display state
+      description: >
+        The gateway polls this endpoint to discover which tags need updating.
+        Returns all known tags. The gateway compares content_hash against what
+        it last rendered; if different, it fetches and pushes the new content.
+      responses:
+        "200":
+          description: List of tags
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TagList"
+
+  /tags/{tag_id}:
+    parameters:
+      - name: tag_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/TagId"
+    get:
+      operationId: getTag
+      summary: Get desired display state for a single tag
+      responses:
+        "200":
+          description: Tag desired state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "404":
+          description: Tag not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      operationId: assignTag
+      summary: Create or update a tag's variation assignment
+      description: >
+        Creates the tag if it does not exist. Pass variation_id to assign a
+        catalog variation; pass null to unassign. content_hash is recomputed
+        immediately so the gateway picks up the change on its next poll.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignBody"
+      responses:
+        "200":
+          description: Tag after assignment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "404":
+          description: variation_id not found in catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /tags/{tag_id}/confirm:
+    parameters:
+      - name: tag_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/TagId"
+    post:
+      operationId: confirmTag
+      summary: Gateway reports what it successfully rendered
+      description: >
+        Called by the gateway after it has pushed content to the physical tag.
+        The service records the confirmation timestamp and battery level.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmBody"
+      responses:
+        "204":
+          description: Confirmation recorded
+        "404":
+          description: Tag not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    TagId:
+      type: string
+      pattern: "^[0-9A-F]{16}$"
+      description: 16-character uppercase hex tag identifier
+
+    Tag:
+      type: object
+      required:
+        - id
+        - content_hash
+      properties:
+        id:
+          $ref: "#/components/schemas/TagId"
+        variation_id:
+          type: string
+          nullable: true
+          description: Square catalog variation ID this tag is assigned to
+        name:
+          type: string
+          nullable: true
+          description: Product name from the Square catalog
+        variation_name:
+          type: string
+          nullable: true
+        sku:
+          type: string
+          nullable: true
+        price:
+          type: integer
+          nullable: true
+          description: Price in smallest currency unit (e.g. cents). Null when VARIABLE_PRICING.
+        pricing_type:
+          type: string
+          nullable: true
+          enum: [FIXED_PRICING, VARIABLE_PRICING]
+        content_hash:
+          type: string
+          nullable: true
+          description: >
+            SHA-256 of the canonical projection. The gateway uses this to detect
+            drift without re-fetching every tag's full content on every poll.
+        last_pushed_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        battery_pct:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 100
+
+    TagList:
+      type: object
+      required:
+        - tags
+      properties:
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+
+    Variation:
+      type: object
+      required:
+        - id
+        - item_id
+        - name
+        - variation_name
+        - pricing_type
+      properties:
+        id:
+          type: string
+        item_id:
+          type: string
+        name:
+          type: string
+          description: Parent item name
+        variation_name:
+          type: string
+        sku:
+          type: string
+          nullable: true
+        price:
+          type: integer
+          nullable: true
+          description: Price in cents. Null when VARIABLE_PRICING.
+        pricing_type:
+          type: string
+          enum: [FIXED_PRICING, VARIABLE_PRICING]
+
+    VariationList:
+      type: object
+      required:
+        - variations
+      properties:
+        variations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Variation"
+
+    AssignBody:
+      type: object
+      properties:
+        variation_id:
+          type: string
+          nullable: true
+          description: Variation to assign. Null to unassign.
+
+    ConfirmBody:
+      type: object
+      required:
+        - content_hash
+      properties:
+        content_hash:
+          type: string
+          description: Hash of what was actually rendered, for drift detection
+        battery_pct:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 100
+
+    Health:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ok]
+
+    Error:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string

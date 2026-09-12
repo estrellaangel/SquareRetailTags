@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+node_modules/
+.env
+CLAUDE.local.md
+src/esl/web/static/
