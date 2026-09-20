@@ -151,7 +151,7 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description 12-character uppercase hex tag identifier (matches the ESL hardware id) */
+        /** @description 12-character hex tag identifier (matches the ESL hardware id). Case-insensitive on input, uppercase on output. Anything that is not 12 hex characters is rejected with 400. */
         TagId: string;
         Store: {
             id: string;
@@ -181,7 +181,7 @@ export interface components {
             price?: number | null;
             /** @enum {string|null} */
             pricing_type?: "FIXED_PRICING" | "VARIABLE_PRICING" | null;
-            /** @description SHA-256 of the canonical projection. The gateway uses this to detect drift without re-fetching every tag's full content on every poll. */
+            /** @description SHA-256 of the canonical projection. The gateway uses this to detect drift without re-fetching every tag's full content on every poll. Null means the tag has no variation assigned — the gateway should show its unassigned screen rather than attempt to render product content. Every tag without a variation reports null here, whether it was never assigned or explicitly unassigned. */
             content_hash: string | null;
             /** Format: date-time */
             last_pushed_at?: string | null;
@@ -398,6 +398,15 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"];
                 };
             };
+            /** @description tag_id is not 12 hex characters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Missing or invalid X-Store-Key */
             401: {
                 headers: {
@@ -442,7 +451,7 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"];
                 };
             };
-            /** @description Tag already belongs to a different store */
+            /** @description tag_id is not 12 hex characters, or the tag already belongs to a different store */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -483,6 +492,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description tag_id is not 12 hex characters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /** @description Missing or invalid X-Store-Key */
             401: {

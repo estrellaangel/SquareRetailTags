@@ -157,6 +157,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Tag"
+        "400":
+          description: tag_id is not 12 hex characters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Missing or invalid X-Store-Key
           content:
@@ -195,7 +201,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Tag"
         "400":
-          description: Tag already belongs to a different store
+          description: >
+            tag_id is not 12 hex characters, or the tag already belongs to a
+            different store
           content:
             application/json:
               schema:
@@ -232,6 +240,12 @@ paths:
       responses:
         "204":
           description: Confirmation recorded
+        "400":
+          description: tag_id is not 12 hex characters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           description: Missing or invalid X-Store-Key
           content:
@@ -261,7 +275,10 @@ components:
     TagId:
       type: string
       pattern: "^[0-9A-F]{12}$"
-      description: 12-character uppercase hex tag identifier (matches the ESL hardware id)
+      description: >
+        12-character hex tag identifier (matches the ESL hardware id).
+        Case-insensitive on input, uppercase on output. Anything that is
+        not 12 hex characters is rejected with 400.
 
     Store:
       type: object
@@ -340,6 +357,10 @@ components:
           description: >
             SHA-256 of the canonical projection. The gateway uses this to detect
             drift without re-fetching every tag's full content on every poll.
+            Null means the tag has no variation assigned — the gateway should
+            show its unassigned screen rather than attempt to render product
+            content. Every tag without a variation reports null here, whether
+            it was never assigned or explicitly unassigned.
         last_pushed_at:
           type: string
           format: date-time

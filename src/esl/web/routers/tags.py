@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
@@ -55,8 +56,24 @@ class ConfirmBody(BaseModel):
         return v
 
 
+_TAG_ID_RE = re.compile(r"^[0-9A-F]{12}$")
+
+
 def _normalize_tag_id(tag_id: str) -> str:
-    return tag_id.upper()
+    """Uppercase and validate at the API boundary.
+
+    12 hex characters is the real ESL hardware id length (confirmed
+    against api/westgate-store-service.yaml). Rejecting here keeps ids
+    the gateway's hardware would refuse as InvalidTagId from ever
+    reaching the database.
+    """
+    normalized = tag_id.upper()
+    if not _TAG_ID_RE.match(normalized):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tag id must be 12 hexadecimal characters, got {tag_id!r}",
+        )
+    return normalized
 
 
 async def get_current_store(
@@ -191,7 +208,11 @@ async def assign_tag(
         proj = build_projection(variation.item, variation, price)
         tag.content_hash = hash_projection(proj)
     else:
-        tag.content_hash = hash_projection(UNASSIGNED)
+        # Null, not a hash of the empty projection: the contract defines
+        # content_hash == null as "unassigned", and that is the only signal
+        # the gateway has to show its unassigned screen instead of trying to
+        # render a product with no name and no price.
+        tag.content_hash = None
 
     await session.commit()
 
