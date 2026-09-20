@@ -8,7 +8,7 @@ paths:
 # Frontend
 
 Vite + React + TypeScript. TanStack Query for fetching, TanStack Table for
-the tag grid, Tailwind v4, shadcn/ui.
+the "All Tags" grid, Tailwind v4, shadcn/ui.
 
 ## Tailwind is v4, not v3
 
@@ -34,8 +34,13 @@ Call the API through the typed client in `src/api/client.ts`
 
 - Function components with hooks. No class components.
 - Server state lives in TanStack Query, not `useState` or context.
-- The tag table is the primary surface. Default sort is battery ascending —
-  the recurring operational task is "which tags need batteries."
+- The "Products" view (item-first: browse catalog items, click one to see
+  and manage the tags assigned to it) is the primary surface — that's the
+  everyday "add/find a tag" workflow. The "All Tags" table is secondary,
+  kept for the one thing item-first browsing is bad at: fleet-wide battery
+  monitoring. Its default sort stays battery ascending — the recurring
+  operational task is "which tags need batteries" — don't change that
+  default just because it's no longer the landing view.
 - Money arrives as integer cents. Format at the render boundary only.
-- Dev requests go through the Vite proxy (`/v1` → localhost:8000).
+- Dev requests go through the Vite proxy (`/v1` → localhost:8001).
   Never hardcode an absolute backend URL; production is same-origin.

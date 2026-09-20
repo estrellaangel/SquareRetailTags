@@ -16,6 +16,7 @@ dependencies = [
     "redis>=5.0",
     "squareup>=44,<45",
     "httpx>=0.28",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [project.optional-dependencies]

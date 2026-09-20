@@ -9,13 +9,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from esl.db import Base
 
 if TYPE_CHECKING:
-    from esl.catalog.models import CatalogVariation
+    from esl.catalog.models import CatalogVariation, Store
 
 
 class Tag(Base):
     __tablename__ = "tags"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
+    store_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("stores.id", ondelete="RESTRICT"), nullable=False
+    )
     variation_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("catalog_variations.id", ondelete="SET NULL")
     )
@@ -27,3 +30,4 @@ class Tag(Base):
     variation: Mapped[CatalogVariation | None] = relationship(
         "CatalogVariation", lazy="raise"
     )
+    store: Mapped[Store] = relationship("Store", lazy="raise")

@@ -38,6 +38,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all stores */
+        get: operations["listStores"];
+        put?: never;
+        /**
+         * Register a new store
+         * @description Returns the generated api_key exactly once. Hand it to that store's gateway operator to configure as the X-Store-Key header — it cannot be retrieved again afterward.
+         */
+        post: operations["createStore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tags across all stores, for the admin dashboard
+         * @description Gated by Auth0 login, not X-Store-Key — the dashboard isn't a gateway and has no per-store key; it authenticates the human instead. Optionally narrow to one store.
+         */
+        get: operations["listTagsAdmin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tags": {
         parameters: {
             query?: never;
@@ -46,8 +87,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List all tags with their desired display state
-         * @description The gateway polls this endpoint to discover which tags need updating. Returns all known tags. The gateway compares content_hash against what it last rendered; if different, it fetches and pushes the new content.
+         * List all tags for the requesting store
+         * @description The gateway polls this endpoint to discover which of its own store's tags need updating. X-Store-Key identifies the store; only that store's tags are returned. The gateway compares content_hash against what it last rendered; if different, it fetches and pushes the new content.
          */
         get: operations["listTags"];
         put?: never;
@@ -67,11 +108,14 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Get desired display state for a single tag */
+        /**
+         * Get desired display state for a single tag
+         * @description Only returns the tag if it belongs to the authenticated store.
+         */
         get: operations["getTag"];
         /**
-         * Create or update a tag's variation assignment
-         * @description Creates the tag if it does not exist. Pass variation_id to assign a catalog variation; pass null to unassign. content_hash is recomputed immediately so the gateway picks up the change on its next poll.
+         * Create or update a tag's store and variation assignment
+         * @description Admin-dashboard action, gated by Auth0 login (not X-Store-Key). Creates the tag if it does not exist, owned by store_id. Pass variation_id to assign a catalog variation; pass null to unassign. A tag's store cannot be changed once set. content_hash is recomputed immediately so the gateway picks up the change on its next poll.
          */
         put: operations["assignTag"];
         post?: never;
@@ -94,7 +138,7 @@ export interface paths {
         put?: never;
         /**
          * Gateway reports what it successfully rendered
-         * @description Called by the gateway after it has pushed content to the physical tag. The service records the confirmation timestamp and battery level.
+         * @description Called by the gateway after it has pushed content to the physical tag. Only works for a tag belonging to the authenticated store. The service records the confirmation timestamp and battery level.
          */
         post: operations["confirmTag"];
         delete?: never;
@@ -107,17 +151,33 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description 16-character uppercase hex tag identifier */
+        /** @description 12-character uppercase hex tag identifier (matches the ESL hardware id) */
         TagId: string;
+        Store: {
+            id: string;
+            name: string;
+            /** @description Square location this store maps to, for resolving per-location price overrides */
+            square_location_id: string;
+        };
+        StoreCreateBody: {
+            id: string;
+            name: string;
+            square_location_id: string;
+        };
+        StoreWithKey: components["schemas"]["Store"] & {
+            /** @description Pass this as X-Store-Key. Shown only once. */
+            api_key: string;
+        };
         Tag: {
             id: components["schemas"]["TagId"];
+            store_id: string;
             /** @description Square catalog variation ID this tag is assigned to */
             variation_id?: string | null;
             /** @description Product name from the Square catalog */
             name?: string | null;
             variation_name?: string | null;
             sku?: string | null;
-            /** @description Price in smallest currency unit (e.g. cents). Null when VARIABLE_PRICING. */
+            /** @description Price in smallest currency unit (e.g. cents), resolved for this tag's store (Square location price overrides applied). Null when pricing_type is VARIABLE_PRICING — the gateway should render placeholder text (e.g. "<name> — See Register") for those, not a price template. */
             price?: number | null;
             /** @enum {string|null} */
             pricing_type?: "FIXED_PRICING" | "VARIABLE_PRICING" | null;
@@ -148,6 +208,8 @@ export interface components {
             variations: components["schemas"]["Variation"][];
         };
         AssignBody: {
+            /** @description Store this tag belongs to. Immutable once the tag is created. */
+            store_id: string;
             /** @description Variation to assign. Null to unassign. */
             variation_id?: string | null;
         };
@@ -212,6 +274,81 @@ export interface operations {
             };
         };
     };
+    listStores: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stores (api_key omitted — only returned once, on creation) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Store"][];
+                };
+            };
+        };
+    };
+    createStore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoreCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Store created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreWithKey"];
+                };
+            };
+            /** @description id or square_location_id already in use */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listTagsAdmin: {
+        parameters: {
+            query?: {
+                store_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of tags, optionally filtered by store */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TagList"];
+                };
+            };
+        };
+    };
     listTags: {
         parameters: {
             query?: never;
@@ -221,13 +358,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description List of tags */
+            /** @description List of tags belonging to the authenticated store */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["TagList"];
+                };
+            };
+            /** @description Missing or invalid X-Store-Key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -252,7 +398,16 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"];
                 };
             };
-            /** @description Tag not found */
+            /** @description Missing or invalid X-Store-Key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tag not found (or belongs to a different store) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -287,7 +442,16 @@ export interface operations {
                     "application/json": components["schemas"]["Tag"];
                 };
             };
-            /** @description variation_id not found in catalog */
+            /** @description Tag already belongs to a different store */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description store_id or variation_id not found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -320,7 +484,16 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Tag not found */
+            /** @description Missing or invalid X-Store-Key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tag not found (or belongs to a different store) */
             404: {
                 headers: {
                     [name: string]: unknown;

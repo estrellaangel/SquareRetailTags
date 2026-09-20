@@ -5,7 +5,13 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from esl.catalog.models import CatalogItem, CatalogVariation, SyncCursor
+from esl.catalog.models import (
+    CatalogItem,
+    CatalogVariation,
+    CatalogVariationLocationPrice,
+    SyncCursor,
+)
+from esl.catalog.pricing import resolve_price
 from esl.square.client import get_client
 from esl.tags.hashing import hash_projection
 from esl.tags.models import Tag
@@ -88,6 +94,22 @@ async def sync_catalog(session: AsyncSession) -> dict:
                 updated_variation_ids.add(var.id)
                 variations_upserted += 1
 
+                for override in vd.location_overrides or []:
+                    if override.location_id is None or override.price_money is None:
+                        continue
+                    await session.execute(
+                        insert(CatalogVariationLocationPrice)
+                        .values(
+                            variation_id=var.id,
+                            square_location_id=override.location_id,
+                            price=override.price_money.amount,
+                        )
+                        .on_conflict_do_update(
+                            index_elements=["variation_id", "square_location_id"],
+                            set_={"price": override.price_money.amount},
+                        )
+                    )
+
         if response.latest_time:
             latest_time = response.latest_time
 
@@ -106,15 +128,22 @@ async def sync_catalog(session: AsyncSession) -> dict:
             await session.execute(
                 select(Tag)
                 .where(Tag.variation_id.in_(updated_variation_ids))
-                .options(selectinload(Tag.variation).selectinload(CatalogVariation.item))
+                .options(
+                    selectinload(Tag.variation).selectinload(CatalogVariation.item),
+                    selectinload(Tag.variation).selectinload(
+                        CatalogVariation.location_prices
+                    ),
+                    selectinload(Tag.store),
+                )
             )
         ).scalars().all()
 
         for tag in tags:
             if tag.variation is None:
                 continue
+            price = resolve_price(tag.variation, tag.store.square_location_id)
             new_hash = hash_projection(
-                build_projection(tag.variation.item, tag.variation)
+                build_projection(tag.variation.item, tag.variation, price)
             )
             if tag.content_hash != new_hash:
                 tag.content_hash = new_hash
