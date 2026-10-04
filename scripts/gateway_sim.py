@@ -1,11 +1,15 @@
 """
 Pi Gateway Simulator — local testing only.
 
-Simulates the Raspberry Pi gateway that polls the ESL pricing service,
-detects content changes, and confirms renders.
+Simulates one store's gateway polling this service's central contract
+(GET /tags, POST /tags/{id}/confirm) and "rendering" whatever it finds. It
+does not model the real Westgate store-service API the gateway speaks to
+its own local Pi (see api/westgate-store-service.yaml and README.md) —
+in particular it never distinguishes FIXED_PRICING from VARIABLE_PRICING
+the way a real gateway must (see README.md's placeholder-text note).
 
 Usage:
-    python scripts/gateway_sim.py [--url http://localhost:8001] [--interval 5]
+    python scripts/gateway_sim.py --key <store api_key> [--url http://localhost:8001] [--interval 5]
 """
 import argparse
 import asyncio
@@ -22,11 +26,12 @@ logging.basicConfig(
 log = logging.getLogger("gateway_sim")
 
 
-async def run(base_url: str, interval: int) -> None:
+async def run(base_url: str, interval: int, store_key: str) -> None:
     # tag_id → {rendered_hash, battery_pct}
     state: dict[str, dict] = {}
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=10) as client:
+    headers = {"X-Store-Key": store_key}
+    async with httpx.AsyncClient(base_url=base_url, timeout=10, headers=headers) as client:
         log.info("Gateway sim started — polling %s every %ds", base_url, interval)
 
         while True:
@@ -100,6 +105,11 @@ async def run(base_url: str, interval: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="ESL gateway simulator")
     parser.add_argument(
+        "--key",
+        required=True,
+        help="Store api_key, from POST /stores (sent as X-Store-Key)",
+    )
+    parser.add_argument(
         "--url",
         default="http://localhost:8001",
         help="Base URL of the ESL pricing service",
@@ -111,7 +121,7 @@ def main() -> None:
         help="Poll interval in seconds (default: 5)",
     )
     args = parser.parse_args()
-    asyncio.run(run(args.url, args.interval))
+    asyncio.run(run(args.url, args.interval, args.key))
 
 
 if __name__ == "__main__":

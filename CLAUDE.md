@@ -1,8 +1,12 @@
 # ESL Pricing Service
 
 Syncs pricing from Square (read-only) and publishes desired state for
-electronic shelf labels. A separate Raspberry Pi gateway, owned by the other
-developer, polls this service and drives the tag hardware.
+electronic shelf labels. Each store runs its own Raspberry Pi gateway, owned
+by the other developer, which polls this service and drives that store's tag
+hardware. The Pi's own local API (what it exposes on the store LAN to
+actually push to labels) is `api/westgate-store-service.yaml` — that's the
+gateway's contract with its hardware, not with us; it's checked in here only
+as a reference for writing the README's gateway-bridging docs.
 
 <!-- Detailed Square SDK and frontend rules are path-scoped in .claude/rules/ -->
 
@@ -11,16 +15,35 @@ developer, polls this service and drives the tag hardware.
 - Square is the source of truth for price. This service is READ-ONLY against
   the catalog. Never write to Square.
 - This service is the source of truth for what each tag displays.
+- The business runs multiple stores. Every tag belongs to exactly one store
+  (`tags.store_id`), and price is resolved per-store: Square's
+  `location_overrides` can override the flat catalog price for a specific
+  location, so the same variation can project to a different price — and a
+  different `content_hash` — in different stores. See
+  `src/esl/catalog/pricing.py::resolve_price`.
 - The gateway is an effector: it renders and pushes, and reports back what it
-  displayed. It never originates price data or computes hashes.
+  displayed. It never originates price data or computes hashes. It cannot be
+  reached from this service — its HTTP API is store-LAN-only — so it's always
+  the gateway polling us (`GET /tags` with its store's `X-Store-Key`), never
+  us calling out to it.
 - `api/esl-pricing-api.yaml` is the contract with the gateway. Treat it as
   authoritative. Changing an endpoint means changing the spec first.
+- The admin dashboard's own routes (`/catalog/variations`, `/admin/tags`,
+  `/stores`, `PUT /tags/{tag_id}`) require an Auth0 bearer token
+  (`src/esl/web/auth.py::get_current_user`) — any authenticated user, no
+  roles. This is unrelated to the gateway's `X-Store-Key`
+  (`get_current_store` in `tags.py`): gateways are software polling a fixed
+  endpoint and can't complete an OAuth redirect, so `GET /tags`, `GET
+  /tags/{tag_id}`, and `POST /tags/{tag_id}/confirm` stay on `X-Store-Key`
+  only. Don't put Auth0 on those, and don't put `X-Store-Key` on admin
+  routes.
 
 ## Layout
 
 - `src/esl/square/` — the ONLY package permitted to import the Square SDK.
   Everything else works with internal dataclasses.
-- `src/esl/catalog/` — sync jobs and the Square mirror.
+- `src/esl/catalog/` — sync jobs, the Square mirror, and per-store price
+  resolution (`pricing.py`).
 - `src/esl/tags/` — desired state, content hashing, drift.
 - `src/esl/web/` — FastAPI routers. Serves the built frontend in production.
 - `frontend/` — Vite + React. See @frontend/README.md
@@ -35,10 +58,16 @@ developer, polls this service and drives the tag hardware.
 - Diff the projection (name, variation_name, sku, price, pricing_type), not
   the Square `version` field. Square bumps a parent item's version when a
   child variation changes, so version-diffing re-pushes half the fleet.
+  `projection.build_projection` takes an already store-resolved `price` —
+  never read `variation.price` directly when building or rehashing a tag's
+  projection, or you'll skip location overrides.
 - Content hashing must be deterministic across processes and restarts:
   sorted keys, integers for money, explicit null handling. Never use Python's
   builtin `hash()`.
-- Tag IDs are normalized to 16-char uppercase hex at the API boundary.
+- Tag IDs are normalized to 12-char uppercase hex at the API boundary — this
+  matches the real ESL hardware id length (confirmed against
+  `api/westgate-store-service.yaml`), not the 16 chars this repo assumed
+  before that spec existed.
 
 ## Commands
 

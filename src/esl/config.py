@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     square_api_version: str = "2026-05-20"
     square_webhook_signature_key: str = ""
     square_webhook_url: str = ""
+    auth0_domain: str = ""
+    auth0_audience: str = ""
 
 
 settings = Settings()

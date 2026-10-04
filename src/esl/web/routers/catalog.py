@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from esl.catalog.models import CatalogVariation
 from esl.db import get_session
+from esl.web.auth import get_current_user
 
 router = APIRouter()
 
@@ -25,7 +26,10 @@ class VariationListResponse(BaseModel):
 
 
 @router.get("/catalog/variations", response_model=VariationListResponse)
-async def list_variations(session: AsyncSession = Depends(get_session)):
+async def list_variations(
+    session: AsyncSession = Depends(get_session),
+    user: dict = Depends(get_current_user),
+):
     rows = (
         await session.execute(
             select(CatalogVariation).options(selectinload(CatalogVariation.item))
