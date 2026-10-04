@@ -534,6 +534,157 @@ function ItemGrid({ onSelect }: { onSelect: (variation: Variation) => void }) {
   );
 }
 
+// ── Signal ───────────────────────────────────────────────────────────────────
+
+type Signal = Tag["signal"];
+
+/** Worst first — what someone scanning the table needs to see at the top. */
+const SIGNAL_RANK: Record<string, number> = {
+  never_heard: 0,
+  out_of_range: 1,
+  weak: 2,
+  ok: 3,
+};
+
+const SIGNAL_STYLE: Record<string, { label: string; className: string }> = {
+  never_heard: {
+    label: "Never heard",
+    className: "bg-red-50 text-red-700 border-red-200",
+  },
+  out_of_range: {
+    label: "Out of range",
+    className: "bg-red-50 text-red-700 border-red-200",
+  },
+  weak: {
+    label: "Weak",
+    className: "bg-yellow-50 text-yellow-800 border-yellow-200",
+  },
+  ok: { label: "In range", className: "bg-green-50 text-green-700 border-green-200" },
+};
+
+function relativeTime(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function SignalPill({
+  signal,
+  rfPower,
+  lastSeenAt,
+}: {
+  signal: Signal;
+  rfPower?: number | null;
+  lastSeenAt?: string | null;
+}) {
+  const style = SIGNAL_STYLE[signal] ?? SIGNAL_STYLE.never_heard;
+
+  // The tooltip carries the detail so the cell itself stays scannable.
+  const title =
+    signal === "never_heard"
+      ? "No access point has ever reported this tag — usually a tag ID that doesn't match real hardware"
+      : `${rfPower ?? "?"} dBm${lastSeenAt ? `, last heard ${relativeTime(lastSeenAt)}` : ""}`;
+
+  return (
+    <span className="inline-flex items-center gap-2 whitespace-nowrap" title={title}>
+      <span
+        className={`text-xs border rounded px-1.5 py-0.5 ${style.className}`}
+      >
+        {style.label}
+      </span>
+      {signal !== "never_heard" && rfPower != null && (
+        <span className="text-xs text-gray-400 tabular-nums">{rfPower} dBm</span>
+      )}
+    </span>
+  );
+}
+
+/** Counts the tags that need attention, so problems are visible without
+ * reading every row. Renders nothing when everything is healthy. */
+function SignalSummary({ tags }: { tags: Tag[] }) {
+  const never = tags.filter((t) => t.signal === "never_heard").length;
+  const out = tags.filter((t) => t.signal === "out_of_range").length;
+  const weak = tags.filter((t) => t.signal === "weak").length;
+  const lowBattery = tags.filter((t) => t.low_battery).length;
+
+  if (never + out + weak + lowBattery === 0) {
+    return (
+      <p className="text-sm text-green-700 mb-3">
+        All {tags.length} tags in range.
+      </p>
+    );
+  }
+
+  const parts = [
+    never > 0 && `${never} never heard`,
+    out > 0 && `${out} out of range`,
+    weak > 0 && `${weak} weak signal`,
+    lowBattery > 0 && `${lowBattery} low battery`,
+  ].filter(Boolean);
+
+  return (
+    <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-sm text-amber-900">
+      <span className="font-medium">Needs attention:</span> {parts.join(" · ")}
+      <span className="text-amber-700">
+        {" "}
+        — sort by Signal to group them.
+      </span>
+    </div>
+  );
+}
+
+// ── Locate ───────────────────────────────────────────────────────────────────
+
+/** Flashes a tag's LED so staff can find it on the shelf.
+ *
+ * The flash is queued, not immediate: the store gateway is LAN-only and
+ * can't be called from here, so it picks the command up on its next poll.
+ * The button says "Queued" rather than "Flashing" for that reason. */
+function LocateButton({ tagId }: { tagId: string }) {
+  const [state, setState] = useState<"idle" | "queued" | "error">("idle");
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await api.POST("/tags/{tag_id}/locate", {
+        params: { path: { tag_id: tagId } },
+        body: {},
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setState("queued");
+      setTimeout(() => setState("idle"), 4000);
+    },
+    onError: () => {
+      setState("error");
+      setTimeout(() => setState("idle"), 4000);
+    },
+  });
+
+  const label =
+    state === "queued" ? "Queued ✓" : state === "error" ? "Failed" : "Locate";
+
+  return (
+    <button
+      className={
+        state === "queued"
+          ? "text-xs text-green-700"
+          : state === "error"
+            ? "text-xs text-red-600"
+            : "text-xs text-gray-600 hover:text-gray-900 hover:underline disabled:opacity-50"
+      }
+      disabled={mutation.isPending || state !== "idle"}
+      title="Flash this label's LED on the gateway's next poll"
+      onClick={() => mutation.mutate()}
+    >
+      {mutation.isPending ? "…" : label}
+    </button>
+  );
+}
+
 // ── Tag Grid ─────────────────────────────────────────────────────────────────
 
 const columnHelper = createColumnHelper<Tag>();
@@ -541,8 +692,13 @@ const columnHelper = createColumnHelper<Tag>();
 function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
   const { data, isLoading, error } = useTags();
 
+  // Battery ascending stays the default: the recurring operational task
+  // this table exists for is "which tags need batteries". The column is
+  // now volts rather than a percentage, because that is what the hardware
+  // actually reports — the sort order is unchanged. Out-of-range tags are
+  // surfaced by the summary banner instead, not by reordering this.
   const [sorting, setSorting] = useState<SortingState>([
-    { id: "battery_pct", desc: false },
+    { id: "battery_volts", desc: false },
   ]);
 
   const columns = [
@@ -575,18 +731,31 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
         return `$${(cents / 100).toFixed(2)}`;
       },
     }),
-    columnHelper.accessor("battery_pct", {
+    columnHelper.accessor("signal", {
+      header: "Signal",
+      sortingFn: (a, b) =>
+        SIGNAL_RANK[a.original.signal] - SIGNAL_RANK[b.original.signal],
+      cell: (info) => (
+        <SignalPill
+          signal={info.getValue()}
+          rfPower={info.row.original.rf_power}
+          lastSeenAt={info.row.original.last_seen_at}
+        />
+      ),
+    }),
+    columnHelper.accessor("battery_volts", {
       header: "Battery",
       cell: (info) => {
-        const pct = info.getValue();
-        if (pct == null) return <span className="text-gray-400">—</span>;
-        const color =
-          pct <= 20
-            ? "text-red-600"
-            : pct <= 50
-              ? "text-yellow-600"
-              : "text-green-600";
-        return <span className={color}>{pct}%</span>;
+        const volts = info.getValue();
+        if (volts == null) return <span className="text-gray-400">—</span>;
+        // Raw volts, not a percentage — the gateway's low-battery flag is
+        // the authority on whether it needs swapping.
+        const low = info.row.original.low_battery;
+        return (
+          <span className={low ? "text-red-600 font-medium" : "text-gray-700"}>
+            {volts.toFixed(1)} V{low ? " ⚠" : ""}
+          </span>
+        );
       },
     }),
     columnHelper.accessor("last_confirmed_at", {
@@ -609,12 +778,15 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
       id: "actions",
       header: "",
       cell: (info) => (
-        <button
-          className="text-xs text-blue-600 hover:underline"
-          onClick={() => onAssign(info.row.original)}
-        >
-          Assign
-        </button>
+        <div className="flex items-center gap-3 justify-end">
+          <LocateButton tagId={info.row.original.id} />
+          <button
+            className="text-xs text-blue-600 hover:underline"
+            onClick={() => onAssign(info.row.original)}
+          >
+            Assign
+          </button>
+        </div>
       ),
     }),
   ];
@@ -638,7 +810,9 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
     );
 
   return (
-    <div className="overflow-x-auto">
+    <div>
+      <SignalSummary tags={data ?? []} />
+      <div className="overflow-x-auto">
       <table className="w-full text-sm border-collapse">
         <thead>
           {table.getHeaderGroups().map((hg) => (
@@ -689,6 +863,7 @@ function TagGrid({ onAssign }: { onAssign: (tag: Tag) => void }) {
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

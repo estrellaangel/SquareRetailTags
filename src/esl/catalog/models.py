@@ -38,6 +38,10 @@ class CatalogVariation(Base):
     variation_name: Mapped[str] = mapped_column(Text, nullable=False)
     sku: Mapped[str | None] = mapped_column(Text)
     price: Mapped[int | None] = mapped_column(Integer)
+    # ISO 4217, straight from Square's price_money. Needed because the
+    # gateway's Money schema requires a currency alongside the amount;
+    # the /v1 contract never carried one.
+    currency: Mapped[str | None] = mapped_column(Text)
     pricing_type: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
 

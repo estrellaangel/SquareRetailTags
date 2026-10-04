@@ -1,8 +1,14 @@
 import jwt
-from fastapi import Header, HTTPException
+from fastapi import HTTPException, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 
 from esl.config import settings
+
+# Declared as a security scheme so /docs renders an Authorize box for the
+# admin routes; it parses the same 'Authorization: Bearer <token>' the
+# dashboard already sends.
+_bearer = HTTPBearer(auto_error=False, description="Auth0 access token")
 
 _jwks_client: PyJWKClient | None = None
 
@@ -17,7 +23,7 @@ def _get_jwks_client() -> PyJWKClient:
 
 
 async def get_current_user(
-    authorization: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
 ) -> dict:
     """Gates the admin dashboard's own routes.
 
@@ -28,9 +34,9 @@ async def get_current_user(
     if not settings.auth0_domain or not settings.auth0_audience:
         raise HTTPException(status_code=503, detail="Auth0 not configured")
 
-    if not authorization or not authorization.startswith("Bearer "):
+    if credentials is None or not credentials.credentials:
         raise HTTPException(status_code=401, detail="Missing bearer token")
-    token = authorization.removeprefix("Bearer ")
+    token = credentials.credentials
 
     try:
         signing_key = _get_jwks_client().get_signing_key_from_jwt(token)

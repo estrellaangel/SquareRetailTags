@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from esl.web.routers import catalog, health, stores, tags, webhooks
+from esl.web.routers import catalog, central, health, stores, tags, webhooks
 
 
 def create_app() -> FastAPI:
@@ -10,6 +10,9 @@ def create_app() -> FastAPI:
     app.include_router(stores.router, prefix="/v1")
     app.include_router(tags.router, prefix="/v1")
     app.include_router(webhooks.router, prefix="/v1")
+    # The store gateway's own contract (api/central-esl-api.yaml) uses
+    # absolute /api/... paths, so it mounts without the /v1 prefix.
+    app.include_router(central.router)
     return app
 
 

@@ -125,6 +125,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tags/{tag_id}/locate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: components["schemas"]["TagId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Flash a tag's LED so staff can find it on the shelf
+         * @description Admin-dashboard action, gated by Auth0 login. Queues a Locate command on the gateway's command queue (api/central-esl-api.yaml) — the flash never changes the screen and sits outside the per-tag version ladder. The response is immediate; the LED flashes on the gateway's next poll.
+         */
+        post: operations["locateTag"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tags/{tag_id}/confirm": {
         parameters: {
             query?: never;
@@ -188,6 +210,22 @@ export interface components {
             /** Format: date-time */
             last_confirmed_at?: string | null;
             battery_pct?: number | null;
+            /**
+             * @description Whether a gateway's access points can currently hear this label, derived from the telemetry they report. `never_heard` means no access point has ever listed it — usually a tag id that does not match any real hardware. `out_of_range` means it was heard once but not within the last hour. `weak` means heard recently at -70 dBm or worse.
+             * @enum {string}
+             */
+            signal?: "ok" | "weak" | "out_of_range" | "never_heard";
+            /** @description Last reported signal strength in dBm. Null if never heard. */
+            rf_power?: number | null;
+            /**
+             * Format: date-time
+             * @description Last time any access point heard this label.
+             */
+            last_seen_at?: string | null;
+            /** @description Battery reading in volts, converted from the raw tenths-of-a-volt byte the hardware reports. Not a percentage — no discharge curve is assumed. */
+            battery_volts?: number | null;
+            /** @description Low-battery flag as computed by the gateway. */
+            low_battery?: boolean | null;
         };
         TagList: {
             tags: components["schemas"]["Tag"][];
@@ -212,6 +250,16 @@ export interface components {
             store_id: string;
             /** @description Variation to assign. Null to unassign. */
             variation_id?: string | null;
+        };
+        LocateBody: {
+            /** @description Flash duration. Omit for the gateway's default (30s). The gateway caps this at its own configured maximum (300s). */
+            seconds?: number;
+        };
+        LocateAccepted: {
+            /** @description Idempotency key of the queued Locate command */
+            update_id: string;
+            tag_id: components["schemas"]["TagId"];
+            seconds?: number | null;
         };
         ConfirmBody: {
             /** @description Hash of what was actually rendered, for drift detection */
@@ -461,6 +509,50 @@ export interface operations {
                 };
             };
             /** @description store_id or variation_id not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    locateTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tag_id: components["schemas"]["TagId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LocateBody"];
+            };
+        };
+        responses: {
+            /** @description Locate queued for the gateway's next poll */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocateAccepted"];
+                };
+            };
+            /** @description tag_id is not 12 hex characters, or seconds is out of range */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tag not found */
             404: {
                 headers: {
                     [name: string]: unknown;

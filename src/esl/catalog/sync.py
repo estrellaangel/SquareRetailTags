@@ -13,6 +13,7 @@ from esl.catalog.models import (
 )
 from esl.catalog.pricing import resolve_price
 from esl.square.client import get_client
+from esl.tags.commands import enqueue_for_tag
 from esl.tags.hashing import hash_projection
 from esl.tags.models import Tag
 from esl.tags.projection import build_projection
@@ -66,6 +67,9 @@ async def sync_catalog(session: AsyncSession) -> dict:
                 vd = var.item_variation_data
                 pricing_type = (vd.pricing_type or "FIXED_PRICING").upper()
                 price = vd.price_money.amount if vd.price_money is not None else None
+                currency = (
+                    vd.price_money.currency if vd.price_money is not None else None
+                )
                 var_updated_at = _parse_dt(var.updated_at)
 
                 await session.execute(
@@ -76,6 +80,7 @@ async def sync_catalog(session: AsyncSession) -> dict:
                         variation_name=vd.name or "",
                         sku=vd.sku or None,
                         price=price,
+                        currency=currency,
                         pricing_type=pricing_type,
                         updated_at=var_updated_at,
                     )
@@ -86,6 +91,7 @@ async def sync_catalog(session: AsyncSession) -> dict:
                             "variation_name": vd.name or "",
                             "sku": vd.sku or None,
                             "price": price,
+                            "currency": currency,
                             "pricing_type": pricing_type,
                             "updated_at": var_updated_at,
                         },
@@ -148,6 +154,15 @@ async def sync_catalog(session: AsyncSession) -> dict:
             if tag.content_hash != new_hash:
                 tag.content_hash = new_hash
                 tags_rehashed += 1
+                # Same change, expressed in the gateway's own model: a new
+                # command on the tag's version ladder. Queued here rather
+                # than left for the gateway to discover by diffing.
+                await enqueue_for_tag(
+                    session,
+                    tag,
+                    build_projection(tag.variation.item, tag.variation, price),
+                    currency=tag.variation.currency or "USD",
+                )
 
     if latest_time:
         await session.execute(
